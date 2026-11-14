@@ -352,10 +352,10 @@ function popupHtml(key){
   });
   return h + '</div></div>';
 }
-map.on('popupopen', e => {
-  e.popup.getElement().querySelectorAll('.pr').forEach(el => el.onclick = () => showDetail(DATA[+el.dataset.i]));
-});
-map.on('popupclose', () => { openKey = null; });
+// one delegated handler: survives every popup redraw
+$('map').addEventListener('click', e => { const pr = e.target.closest('.leaflet-popup .pr'); if(pr) showDetail(DATA[+pr.dataset.i]); }, true);
+map.on('popupclose', e => { if(e.popup._source && e.popup._source._gdKey === openKey) openKey = null; });
+map.on('click', () => closeDetail());   // tap on empty map clears the selection
 
 function drawMarkers(){
   const live = new Map(); visible.forEach(c => { if(!live.has(c.key)) live.set(c.key, []); live.get(c.key).push(c); });
@@ -364,13 +364,15 @@ function drawMarkers(){
     let m = markers.get(k);
     if(!m){
       m = L.marker([list[0].lat, list[0].lng], {icon:pinIcon(list,false)}).addTo(map);
-      m.on('click', () => { openKey = k; m.bindPopup(popupHtml(k), {maxWidth:320}).openPopup(); });
+      m._gdKey = k;
+      m.bindPopup(() => popupHtml(k), {maxWidth:320, autoPanPadding:[20,70]});
+      m.on('popupopen', () => { openKey = k; if(detailClimb && detailClimb.key !== k) closeDetail(); });
       markers.set(k, m);
     }
     m.setIcon(pinIcon(list, false));
     m.setZIndexOffset(list.length);
   });
-  if(openKey && markers.has(openKey)) markers.get(openKey).setPopupContent(popupHtml(openKey));
+  if(openKey && markers.has(openKey)) markers.get(openKey).getPopup().update();
   else if(openKey) map.closePopup();
 }
 
@@ -417,13 +419,16 @@ function hl(k){
 function focusClimb(c){
   map.flyTo([c.lat, c.lng], Math.max(map.getZoom(), 18), {duration:.5});
   const m = markers.get(c.key);
-  if(m){ openKey = c.key; m.bindPopup(popupHtml(c.key), {maxWidth:320}).openPopup(); }
   showDetail(c);
+  if(m && !MOB()){ if(m.isPopupOpen()) m.getPopup().update(); else m.openPopup(); }
   if(MOB()){ $('side').classList.remove('up'); $('side').scrollTop = 0; $('toggle').textContent = 'Filters'; }
 }
 
 // ---------- detail ----------
+let detailClimb = null;
+function closeDetail(){ detailClimb = null; $('detail').classList.remove('open'); document.querySelectorAll('.item.sel').forEach(x => x.classList.remove('sel')); }
 function showDetail(c){
+  detailClimb = c;
   document.querySelectorAll('.item.sel').forEach(x => x.classList.remove('sel'));
   const it = document.querySelector(`.item[data-i="${c.i}"]`); if(it){ it.classList.add('sel'); it.scrollIntoView({block:'nearest'}); }
   const facts = [
@@ -451,9 +456,9 @@ function showDetail(c){
   if(MOB()) map.closePopup();
   $('gsel').onchange = e => { LOCAL[c.id] = e.target.value; saveLocal(); setGrade(c); apply(); showDetail(c); toast('Grade saved on this device.'); };
   if($('gres')) $('gres').onclick = () => { delete LOCAL[c.id]; saveLocal(); setGrade(c); apply(); showDetail(c); };
-  $('close').onclick = () => { $('detail').classList.remove('open'); document.querySelectorAll('.item.sel').forEach(x => x.classList.remove('sel')); };
+  $('close').onclick = closeDetail;
 }
-document.addEventListener('keydown', e => { if(e.key === 'Escape') $('detail').classList.remove('open'); });
+document.addEventListener('keydown', e => { if(e.key === 'Escape') closeDetail(); });
 
 function syncEdits(){ const n = Object.keys(LOCAL).length; $('edits').style.display = n ? 'inline' : 'none'; $('edits').textContent = 'Copy edits ('+n+')'; }
 $('edits').onclick = async () => {
